@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const REPO_OWNER = "goatbotnx";
+const REPO_OWNER = "codex-xalman";
 const REPO_NAME = "GOAT-BOT-UPDATED";
 const REPO_LINK = `https://github.com/${REPO_OWNER}/${REPO_NAME}`;
 const REPO_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
@@ -8,7 +8,7 @@ const REPO_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
 module.exports = {
   config: {
     name: "fork",
-    version: "4.5",
+    version: "4.6",
     author: "xalman",
     countDown: 5,
     role: 0,
