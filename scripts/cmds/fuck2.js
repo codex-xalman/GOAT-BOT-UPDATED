@@ -71,7 +71,7 @@ module.exports = {
     role: 3,
     shortDescription: "Fuck2 canvas - explicit couple image",
     longDescription: "Sender on id1, target (mention/reply/UID) on id2",
-    category: "LOVE",
+    category: "NSFW",
     guide: { en: "{pn} @user | reply | {pn} <uid>" }
   },
 
