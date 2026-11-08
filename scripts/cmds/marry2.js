@@ -70,44 +70,37 @@ async function detectGender(uid) {
     const url = `https://graph.facebook.com/${uid}?fields=gender&access_token=6628568379%7Cc1e620fa708a1d5696fb991c1bde5662`;
     const res = await axios.get(url, { timeout: 10000 });
     const g = res.data?.gender;
-    if (g === "male") return "male";
-    if (g === "female") return "female";
+    if (g === "male") return 2;
+    if (g === "female") return 1;
   } catch (e) { }
-  return null;
+  return 0;
 }
 
 module.exports = {
   config: {
     name: "marry2",
     aliases: ["wedding2", "biye2"],
-    version: "1.5",
+    version: "2.0",
     author: "xalman",
     countDown: 5,
     role: 0,
     shortDescription: "Wedding canvas - marry couple",
-    longDescription: "Auto-detects genders of the two users and places boy on left, girl on right",
+    longDescription: "Auto-detects genders (1=Female, 2=Male) and places boy left, girl right",
     category: "LOVE",
     guide: { en: "{pn} @user | reply | {pn} <uid>" }
   },
 
-  onStart: async function ({ api, event, args }) {
-    const { threadID, messageID, mentions, messageReply, senderID } = event;
+  onStart: async function ({ api, event, args, usersData }) {
+    const { threadID, messageID, senderID, mentions, type, messageReply } = event;
 
-    let uidA = senderID;
-    let uidB = null;
+    let mentionID;
+    if (type === "message_reply") mentionID = messageReply.senderID;
+    else if (Object.keys(mentions || {}).length > 0) mentionID = Object.keys(mentions)[0];
+    else if (args[0]) mentionID = args[0];
 
-    const mIDs = Object.keys(mentions || {}).filter(id => id !== senderID);
-    if (mIDs.length > 0) uidB = mIDs[0];
-    else if (messageReply && messageReply.senderID) uidB = messageReply.senderID;
-    else {
-      const uidArg = args.find(a => /^\d{6,}$/.test(a));
-      if (uidArg) uidB = uidArg;
-    }
-
-    if (!uidB) {
+    if (!mentionID) {
       return api.sendMessage(
-        "⚠️ Please mention, reply to, or provide the UID of the other user.\n" +
-        "Example: marry @user  |  reply with marry  |  marry 61596383823942",
+        "Please mention someone, reply to a message, or provide a UID! 🌧️",
         threadID, messageID
       );
     }
@@ -117,16 +110,26 @@ module.exports = {
     try {
       api.setMessageReaction("⏳", messageID, () => {}, true);
 
-      const [gA, gB] = await Promise.all([detectGender(uidA), detectGender(uidB)]);
+      const senderInfo = await usersData.get(senderID);
+      const mentionInfo = await usersData.get(mentionID);
+
+      const senderName = senderInfo?.name || "Someone";
+      const mentionName = mentionInfo?.name || "Someone";
+      let senderGender = Number(senderInfo?.gender) || 0;
+      let mentionGender = Number(mentionInfo?.gender) || 0;
+
+      if (senderGender !== 1 && senderGender !== 2) senderGender = await detectGender(senderID);
+      if (mentionGender !== 1 && mentionGender !== 2) mentionGender = await detectGender(mentionID);
 
       let boyId, girlId;
-      if (gA === "male" && gB === "female") { boyId = uidA; girlId = uidB; }
-      else if (gA === "female" && gB === "male") { boyId = uidB; girlId = uidA; }
-      else if (gA === "male") { boyId = uidA; girlId = uidB; }
-      else if (gB === "male") { boyId = uidB; girlId = uidA; }
-      else if (gA === "female") { girlId = uidA; boyId = uidB; }
-      else if (gB === "female") { girlId = uidB; boyId = uidA; }
-      else { boyId = uidA; girlId = uidB; }
+
+      if (senderGender === 2 && mentionGender === 1) { boyId = senderID; girlId = mentionID; }
+      else if (senderGender === 1 && mentionGender === 2) { boyId = mentionID; girlId = senderID; }
+      else if (senderGender === 2) { boyId = senderID; girlId = mentionID; }
+      else if (mentionGender === 2) { boyId = mentionID; girlId = senderID; }
+      else if (senderGender === 1) { girlId = senderID; boyId = mentionID; }
+      else if (mentionGender === 1) { girlId = mentionID; boyId = senderID; }
+      else { boyId = senderID; girlId = mentionID; }
 
       const base = await getApiBaseUrl();
       const url = `${base}/api/marry?id1=${encodeURIComponent(boyId)}&id2=${encodeURIComponent(girlId)}`;
@@ -141,7 +144,7 @@ module.exports = {
       api.setMessageReaction("💍", messageID, () => {}, true);
 
       return api.sendMessage({
-        body: pick(CAPTIONS),
+        body: `${senderName} married ${mentionName} 💍\n\n` + pick(CAPTIONS),
         attachment: fs.createReadStream(outPath)
       }, threadID, async () => {
         if (outPath && fs.existsSync(outPath)) await fs.unlink(outPath);
