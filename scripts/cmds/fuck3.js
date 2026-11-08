@@ -68,7 +68,7 @@ module.exports = {
     version: "2.0",
     author: "xalman",
     countDown: 5,
-    role: 0,
+    role: 3,
     shortDescription: "Fuck3 canvas - explicit couple image",
     longDescription: "Sender on id1, target (mention/reply/UID) on id2",
     category: "NSFW",
