@@ -72,7 +72,7 @@ module.exports = {
     role: 0,
     shortDescription: "Snake/Nagin canvas using target UID pfp",
     longDescription: "Generates an image with the target's pfp on a snake/nagin",
-    category: "FUN",
+    category: "FUN & SOCIAL",
     guide: { en: "{pn} @user | reply | {pn} <uid>" }
   },
 
