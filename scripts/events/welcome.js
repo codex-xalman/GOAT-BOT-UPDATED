@@ -2,286 +2,468 @@ const { getTime } = global.utils;
 const axios = require("axios");
 const fs = require("fs-extra");
 const path = require("path");
-const { createCanvas, loadImage } = require('canvas');
+const { createCanvas, loadImage } = require("canvas");
 
 if (!global.temp.welcomeEvent)
     global.temp.welcomeEvent = {};
 
-function drawHexagon(ctx, x, y, radius, color, fill = false, lineWidth = 3) {
+const FONT = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
+
+const THEMES = {
+    welcome: { a: "#00f0ff", b: "#ff2bd6", c: "#7b61ff" },
+    bot: { a: "#a855ff", b: "#00ffa3", c: "#ff3d81" }
+};
+
+function rgba(hex, alpha) {
+    const h = hex.replace("#", "");
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function ordinal(n) {
+    const s = ["th", "st", "nd", "rd"];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function setFont(ctx, size, weight = "bold") {
+    ctx.font = `${weight} ${size}px ${FONT}`;
+}
+
+function fitText(ctx, text, maxWidth, size, weight = "bold", minSize = 16) {
+    let s = size;
+    setFont(ctx, s, weight);
+    while (ctx.measureText(text).width > maxWidth && s > minSize) {
+        s -= 1;
+        setFont(ctx, s, weight);
+    }
+    if (ctx.measureText(text).width > maxWidth) {
+        let t = text;
+        while (t.length > 1 && ctx.measureText(t + "...").width > maxWidth) t = t.slice(0, -1);
+        return t + "...";
+    }
+    return text;
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+function hexPath(ctx, x, y, r) {
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
-        const angle = (i * Math.PI) / 3 - Math.PI / 6;
-        const px = x + radius * Math.cos(angle);
-        const py = y + radius * Math.sin(angle);
+        const ang = (Math.PI / 3) * i - Math.PI / 6;
+        const px = x + r * Math.cos(ang);
+        const py = y + r * Math.sin(ang);
         if (i === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    if (fill) {
-        ctx.fillStyle = color;
-        ctx.fill();
-    } else {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = lineWidth;
-        ctx.stroke();
-    }
 }
 
-function drawPegasus(ctx, x, y, size, color) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(size / 100, size / 100);
-    ctx.fillStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 20;
-    
+function shapePath(ctx, shape, x, y, r) {
+    if (shape === "hex") return hexPath(ctx, x, y, r);
     ctx.beginPath();
-    ctx.moveTo(-10, 20);
-    ctx.lineTo(-20, -10);
-    ctx.lineTo(-5, -25);
-    ctx.lineTo(5, -15);
-    ctx.lineTo(15, -30);
-    ctx.lineTo(25, -20);
-    ctx.lineTo(15, -5);
-    ctx.lineTo(20, 20);
-    ctx.lineTo(5, 25);
-    ctx.moveTo(-10, -5);
-    ctx.quadraticCurveTo(-40, -30, -50, 0);
-    ctx.quadraticCurveTo(-30, -10, -15, 5);
-    ctx.moveTo(-5, -10);
-    ctx.quadraticCurveTo(-30, -45, -45, -15);
-    ctx.quadraticCurveTo(-20, -20, -5, 0);
-    ctx.fill();
-    
-    ctx.shadowBlur = 0;
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+}
+
+function glowStroke(ctx, color, width, blur) {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = blur;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    ctx.stroke();
     ctx.restore();
 }
 
-function drawProfileImage(ctx, imageUrl, x, y, size, borderColor, glowColor, shape) {
-    return new Promise(async (resolve) => {
-        try {
-            const response = await axios.get(imageUrl, { responseType: "arraybuffer", headers: { "User-Agent": "Mozilla/5.0" } });
-            const img = await loadImage(Buffer.from(response.data));
-            const radius = size / 2;
-
-            ctx.save();
-            ctx.shadowColor = glowColor || borderColor;
-            ctx.shadowBlur = 40;
-
-            if (shape === 'hexagon') {
-                drawHexagon(ctx, x, y, radius + 15, borderColor, true);
-                ctx.shadowBlur = 0;
-                
-                ctx.save();
-                ctx.beginPath();
-                for (let i = 0; i < 6; i++) {
-                    const angle = (i * Math.PI) / 3 - Math.PI / 6;
-                    const px = x + radius * Math.cos(angle);
-                    const py = y + radius * Math.sin(angle);
-                    if (i === 0) ctx.moveTo(px, py);
-                    else ctx.lineTo(px, py);
-                }
-                ctx.closePath();
-                ctx.clip();
-                ctx.drawImage(img, x - radius, y - radius, size, size);
-                ctx.restore();
-                
-                drawHexagon(ctx, x, y, radius, "#ffffff", false, 4);
-            } else {
-                ctx.beginPath();
-                ctx.arc(x, y, radius + 10, 0, Math.PI * 2);
-                ctx.fillStyle = borderColor;
-                ctx.fill();
-                ctx.shadowBlur = 0;
-
-                ctx.beginPath();
-                ctx.arc(x, y, radius, 0, Math.PI * 2);
-                ctx.clip();
-                ctx.drawImage(img, x - radius, y - radius, size, size);
-                ctx.restore();
-            }
-            resolve();
-        } catch (error) {
-            ctx.beginPath();
-            if (shape === 'hexagon') drawHexagon(ctx, x, y, size/2, borderColor, true);
-            else { ctx.arc(x, y, size/2, 0, Math.PI*2); ctx.fillStyle = borderColor; ctx.fill(); }
-            resolve();
-        }
-    });
+function neonText(ctx, text, x, y, color, blur = 25, core = "#ffffff") {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = blur;
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+    ctx.fillText(text, x, y);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = core;
+    ctx.fillText(text, x, y);
+    ctx.restore();
 }
 
-async function createWelcomeCard(gcImg, userImg, adderImg, userName, userNumber, threadName, adderName) {
-    const width = 1600;
-    const height = 900;
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
+async function fetchImage(url) {
+    if (!url) return null;
+    try {
+        const res = await axios.get(url, {
+            responseType: "arraybuffer",
+            headers: { "User-Agent": "Mozilla/5.0" },
+            timeout: 15000
+        });
+        return await loadImage(Buffer.from(res.data));
+    } catch (e) {
+        return null;
+    }
+}
 
-    const bgGradient = ctx.createRadialGradient(width/2, height/2, 100, width/2, height/2, 1000);
-    bgGradient.addColorStop(0, "#14141a");
-    bgGradient.addColorStop(1, "#050508");
-    ctx.fillStyle = bgGradient;
-    ctx.fillRect(0, 0, width, height);
+function drawBackground(ctx, w, h, t) {
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, "#06060f");
+    g.addColorStop(0.5, "#0c0a1f");
+    g.addColorStop(1, "#04040a");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
 
-    ctx.strokeStyle = "rgba(0, 255, 255, 0.04)";
+    const glow = (x, y, r, color) => {
+        const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+        rg.addColorStop(0, rgba(color, 0.32));
+        rg.addColorStop(1, rgba(color, 0));
+        ctx.fillStyle = rg;
+        ctx.fillRect(0, 0, w, h);
+    };
+    glow(0, 0, 750, t.a);
+    glow(w, h, 850, t.b);
+    glow(w, 0, 550, t.b);
+    glow(0, h, 550, t.a);
+
+    ctx.strokeStyle = rgba(t.a, 0.05);
     ctx.lineWidth = 1;
-    for (let i = 0; i < width; i += 50) {
-        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
-    }
-    for (let j = 0; j < height; j += 50) {
-        ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(width, j); ctx.stroke();
-    }
-
-    ctx.strokeStyle = "rgba(255, 102, 0, 0.05)";
-    ctx.lineWidth = 2;
-    for (let i = -height; i < width; i += 100) {
-        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + height, height); ctx.stroke();
-    }
-
-    ctx.fillStyle = "rgba(0, 255, 255, 0.03)";
-    for (let i = 0; i < 15; i++) {
-        const x = Math.random() * width;
-        const y = Math.random() * height;
-        const size = 100 + Math.random() * 300;
+    for (let x = 0; x < w; x += 50) {
         ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+    }
+    for (let y = 0; y < h; y += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+    }
+
+    for (let i = 0; i < 110; i++) {
+        const x = Math.random() * w;
+        const y = Math.random() * h;
+        const r = Math.random() * 2 + 0.5;
+        ctx.fillStyle = rgba(Math.random() > 0.5 ? t.a : t.b, Math.random() * 0.5 + 0.1);
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
     }
+}
 
-    ctx.strokeStyle = "#2a2a35";
-    ctx.lineWidth = 8;
-    ctx.strokeRect(40, 40, width - 80, height - 80);
-    
-    ctx.strokeStyle = "#111116";
-    ctx.lineWidth = 15;
-    ctx.strokeRect(25, 25, width - 50, height - 50);
+function drawFrame(ctx, w, h, t) {
+    roundRectPath(ctx, 30, 30, w - 60, h - 60, 24);
+    glowStroke(ctx, t.a, 4, 30);
 
-    const drawCorner = (cx, cy, dx, dy) => {
-        ctx.strokeStyle = "#00e5ff";
-        ctx.lineWidth = 4;
+    roundRectPath(ctx, 48, 48, w - 96, h - 96, 16);
+    ctx.strokeStyle = rgba(t.b, 0.45);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const o = 66;
+    const L = 80;
+    const corners = [[o, o, 1, 1], [w - o, o, -1, 1], [o, h - o, 1, -1], [w - o, h - o, -1, -1]];
+    for (const [cx, cy, dx, dy] of corners) {
         ctx.beginPath();
-        ctx.moveTo(cx, cy + dy * 60); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx * 60, cy);
-        ctx.stroke();
-        
-        ctx.strokeStyle = "#ff6600";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(cx + dx * 10, cy + dy * 70); ctx.lineTo(cx + dx * 10, cy + dy * 10); ctx.lineTo(cx + dx * 70, cy + dy * 10);
-        ctx.stroke();
-    };
-    drawCorner(60, 60, 1, 1);
-    drawCorner(width - 60, 60, -1, 1);
-    drawCorner(60, height - 60, 1, -1);
-    drawCorner(width - 60, height - 60, -1, -1);
+        ctx.moveTo(cx, cy + dy * L);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx + dx * L, cy);
+        glowStroke(ctx, t.b, 5, 25);
+    }
+}
 
-    ctx.fillStyle = "#15151a";
+function drawDivider(ctx, x1, x2, y, t) {
+    const g = ctx.createLinearGradient(x1, 0, x2, 0);
+    g.addColorStop(0, rgba(t.a, 0));
+    g.addColorStop(0.25, t.a);
+    g.addColorStop(0.75, t.b);
+    g.addColorStop(1, rgba(t.b, 0));
+    ctx.save();
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = t.a;
+    ctx.shadowBlur = 15;
     ctx.beginPath();
-    ctx.roundRect(width/2 - 450, 50, 900, 80, 10);
+    ctx.moveTo(x1, y);
+    ctx.lineTo(x2, y);
+    ctx.stroke();
+
+    const cx = (x1 + x2) / 2;
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = t.b;
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.moveTo(cx, y - 9);
+    ctx.lineTo(cx + 9, y);
+    ctx.lineTo(cx, y + 9);
+    ctx.lineTo(cx - 9, y);
+    ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = "#3a3a45";
+    ctx.restore();
+}
+
+function drawAvatar(ctx, img, x, y, r, shape, colorA, colorB) {
+    ctx.save();
+    shapePath(ctx, shape, x, y, r + 28);
+    glowStroke(ctx, colorB, 3, 25);
+    shapePath(ctx, shape, x, y, r + 13);
+    glowStroke(ctx, colorA, 6, 35);
+    ctx.restore();
+
+    ctx.save();
+    shapePath(ctx, shape, x, y, r);
+    ctx.clip();
+    if (img) {
+        const s = Math.max((2 * r) / img.width, (2 * r) / img.height);
+        const iw = img.width * s;
+        const ih = img.height * s;
+        ctx.drawImage(img, x - iw / 2, y - ih / 2, iw, ih);
+    } else {
+        const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+        rg.addColorStop(0, rgba(colorA, 0.6));
+        rg.addColorStop(1, "#0a0a18");
+        ctx.fillStyle = rg;
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    ctx.restore();
+
+    shapePath(ctx, shape, x, y, r);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+}
+
+function drawMiniAvatar(ctx, img, x, y, r, color) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.clip();
+    if (img) {
+        const s = Math.max((2 * r) / img.width, (2 * r) / img.height);
+        const iw = img.width * s;
+        const ih = img.height * s;
+        ctx.drawImage(img, x - iw / 2, y - ih / 2, iw, ih);
+    } else {
+        ctx.fillStyle = rgba(color, 0.4);
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 3;
     ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, r + 6, 0, Math.PI * 2);
+    glowStroke(ctx, color, 3, 14);
+}
+
+function drawInfoBox(ctx, x, y, w, h, label, value, color, avatar) {
+    ctx.save();
+    roundRectPath(ctx, x, y, w, h, 14);
+    ctx.fillStyle = "rgba(12,12,28,0.85)";
+    ctx.fill();
+    glowStroke(ctx, color, 2.5, 14);
+
+    roundRectPath(ctx, x + 14, y + 18, 6, h - 36, 3);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    setFont(ctx, 18);
+    ctx.fillStyle = rgba("#ffffff", 0.55);
+    ctx.fillText(label, x + 38, y + 32);
+
+    let maxW = w - 38 - 24;
+    if (avatar) maxW -= 80;
+    const text = fitText(ctx, value, maxW, h >= 100 ? 34 : 30);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(text, x + 38, y + h - 20);
+
+    if (avatar) drawMiniAvatar(ctx, avatar.img, x + w - 58, y + h / 2, 30, color);
+}
+
+function drawBanner(ctx, cx, cy, text, color, maxW) {
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const fitted = fitText(ctx, text, maxW - 90, 32);
+    const tw = ctx.measureText(fitted).width;
+    const w = tw + 90;
+    const h = 58;
+    ctx.save();
+    roundRectPath(ctx, cx - w / 2, cy - h / 2, w, h, h / 2);
+    ctx.fillStyle = "rgba(10,10,26,0.9)";
+    ctx.fill();
+    glowStroke(ctx, color, 3, 20);
+    ctx.restore();
+    neonText(ctx, fitted, cx, cy + 2, color, 15);
+}
+
+async function createWelcomeCard(d) {
+    const W = 1600;
+    const H = 900;
+    const t = THEMES.welcome;
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d");
+
+    drawBackground(ctx, W, H, t);
+    drawFrame(ctx, W, H, t);
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = 'bold 45px "Segoe UI", Arial, sans-serif';
-    
-    let displayGroupName = threadName.length > 15 ? threadName.substring(0, 15) + "..." : threadName;
-    
-    ctx.shadowColor = "#00e5ff";
-    ctx.shadowBlur = 20;
-    ctx.fillStyle = "#00e5ff";
-    ctx.fillText("WELCOME TO", width/2 - 150, 90);
-    
-    ctx.shadowColor = "#ff6600";
-    ctx.fillStyle = "#ff8800";
-    ctx.fillText(displayGroupName.toUpperCase(), width/2 + 200, 90);
-    ctx.shadowBlur = 0;
+    setFont(ctx, 100);
+    neonText(ctx, "WELCOME", W / 2, 120, t.a, 45);
+    const sub = fitText(ctx, "TO  " + d.groupName.toUpperCase(), 1100, 42);
+    neonText(ctx, sub, W / 2, 190, t.b, 28);
+    drawDivider(ctx, 160, W - 160, 236, t);
 
-    const leftBoxX = 100;
-    const leftBoxY = 200;
-
-    ctx.textAlign = "left";
-    ctx.font = 'bold 30px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = "#cccccc";
-    ctx.fillText("GROUP", leftBoxX + 40, leftBoxY + 40);
-
-    await drawProfileImage(ctx, gcImg, leftBoxX + 180, leftBoxY + 230, 240, "#1a1a22", "#00e5ff", 'hexagon');
-    drawHexagon(ctx, leftBoxX + 180, leftBoxY + 230, 150, "#00e5ff", false, 6);
-    
+    drawAvatar(ctx, d.groupImg, 290, 425, 125, "hex", t.a, t.b);
     ctx.textAlign = "center";
-    ctx.font = 'bold 24px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = "#00e5ff";
-    ctx.shadowColor = "#00e5ff";
-    ctx.shadowBlur = 10;
-    ctx.fillText(displayGroupName.toUpperCase(), leftBoxX + 180, leftBoxY + 360);
-    ctx.shadowBlur = 0;
+    ctx.textBaseline = "middle";
+    const gName = fitText(ctx, d.groupName, 420, 36);
+    neonText(ctx, gName, 290, 625, t.a, 18);
+    setFont(ctx, 20, "normal");
+    ctx.fillStyle = rgba("#ffffff", 0.5);
+    ctx.fillText("GROUP", 290, 667);
 
-    const drawInfoBox = (x, y, w, h, title, value, isOffline = false) => {
-        ctx.fillStyle = "#111116";
-        ctx.beginPath();
-        ctx.roundRect(x, y, w, h, 10);
-        ctx.fill();
-        ctx.strokeStyle = "#2a2a35";
-        ctx.lineWidth = 2;
-        ctx.stroke();
+    drawAvatar(ctx, d.userImg, 1310, 425, 150, "circle", t.b, t.a);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const uName = fitText(ctx, d.userName, 460, 46);
+    neonText(ctx, uName, 1310, 650, t.b, 20);
+    drawBanner(ctx, 1310, 725, `${ordinal(d.memberCount)} MEMBER`, t.a, 460);
 
-        ctx.textAlign = "left";
-        ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
-        ctx.fillStyle = "#888888";
-        ctx.fillText(title, x + 25, y + 35);
+    drawInfoBox(ctx, 520, 285, 560, 100, "TOTAL MEMBERS", String(d.memberCount), t.a);
+    drawInfoBox(ctx, 520, 400, 560, 100, "ADDED BY", d.adderName, t.b, { img: d.adderImg });
+    drawInfoBox(ctx, 520, 515, 560, 100, "JOINED ON", `${d.dateStr}  |  ${d.timeStr}`, t.c);
 
-        ctx.font = 'bold 32px "Segoe UI", Arial, sans-serif';
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(value, x + 25, y + 80);
+    drawDivider(ctx, 160, W - 160, 788, t);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    setFont(ctx, 22, "normal");
+    ctx.fillStyle = rgba("#ffffff", 0.55);
+    ctx.fillText("Created By xalman", W / 2, 828);
 
-        if (isOffline) {
-            ctx.font = '16px "Segoe UI", Arial, sans-serif';
-            ctx.fillStyle = "#ff3333";
-            ctx.fillText("● OFFLINE", x + w - 100, y + 35);
-        }
+    return canvas.toBuffer("image/png");
+}
+
+async function createBotCard(d) {
+    const W = 1600;
+    const H = 900;
+    const t = THEMES.bot;
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d");
+
+    drawBackground(ctx, W, H, t);
+    drawFrame(ctx, W, H, t);
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    setFont(ctx, 80);
+    neonText(ctx, "THANKS FOR INVITING ME", W / 2, 115, t.a, 40);
+    const sub = fitText(ctx, `I AM ${d.botName.toUpperCase()}`, 900, 40);
+    neonText(ctx, sub, W / 2, 185, t.b, 26);
+    drawDivider(ctx, 160, W - 160, 230, t);
+
+    drawAvatar(ctx, d.groupImg, 280, 395, 110, "hex", t.a, t.b);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const gName = fitText(ctx, d.groupName, 400, 34);
+    neonText(ctx, gName, 280, 575, t.a, 16);
+    setFont(ctx, 20, "normal");
+    ctx.fillStyle = rgba("#ffffff", 0.5);
+    ctx.fillText("GROUP", 280, 612);
+
+    drawAvatar(ctx, d.botImg, 800, 395, 140, "circle", t.b, t.a);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const bName = fitText(ctx, d.botName, 440, 44);
+    neonText(ctx, bName, 800, 590, t.b, 20);
+    setFont(ctx, 20, "normal");
+    ctx.fillStyle = rgba("#ffffff", 0.5);
+    ctx.fillText("BOT", 800, 627);
+
+    drawAvatar(ctx, d.adderImg, 1320, 395, 110, "hex", t.a, t.b);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const aName = fitText(ctx, d.adderName, 400, 34);
+    neonText(ctx, aName, 1320, 575, t.a, 16);
+    setFont(ctx, 20, "normal");
+    ctx.fillStyle = rgba("#ffffff", 0.5);
+    ctx.fillText("ADDED BY", 1320, 612);
+
+    const bw = 322;
+    const gap = 30;
+    const bx = 110;
+    const by = 655;
+    drawInfoBox(ctx, bx, by, bw, 90, "TOTAL MEMBERS", String(d.memberCount), t.a);
+    drawInfoBox(ctx, bx + (bw + gap), by, bw, 90, "ADMINS", String(d.adminCount), t.b);
+    drawInfoBox(ctx, bx + (bw + gap) * 2, by, bw, 90, "PREFIX", `[ ${d.prefix} ]`, t.c);
+    drawInfoBox(ctx, bx + (bw + gap) * 3, by, bw, 90, "ADDED ON", d.dateStr, t.a);
+
+    drawBanner(ctx, W / 2, 790, `TYPE  [ ${d.prefix}help ]  TO SEE MY MENU`, t.b, 1000);
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    setFont(ctx, 18, "normal");
+    ctx.fillStyle = rgba("#ffffff", 0.5);
+    ctx.fillText("Created By xalman", W / 2, 836);
+
+    return canvas.toBuffer("image/png");
+}
+
+async function getGroupInfo(api, threadID, threadData) {
+    let info = null;
+    try {
+        info = await api.getThreadInfo(threadID);
+    } catch (e) { }
+
+    const fallbackCount = () => {
+        const m = threadData && threadData.members;
+        if (!m) return 1;
+        const arr = Array.isArray(m) ? m : Object.values(m);
+        return arr.filter((x) => x && x.inGroup !== false).length || 1;
     };
 
-    drawInfoBox(leftBoxX + 360, leftBoxY + 100, 500, 120, "THREAD NAME", `[ ${threadName} ]`);
-    drawInfoBox(leftBoxX + 360, leftBoxY + 250, 500, 130, "ADDED BY", adderName, true);
+    return {
+        name: (info && (info.threadName || info.name)) || (threadData && threadData.threadName) || "this group",
+        memberCount: (info && info.participantIDs && info.participantIDs.length) || fallbackCount(),
+        adminCount: (info && info.adminIDs && info.adminIDs.length) || (threadData && threadData.adminIDs && threadData.adminIDs.length) || 0,
+        image: (info && info.imageSrc) || (threadData && threadData.imageSrc) || `https://graph.facebook.com/${threadID}/picture?width=720&height=720`
+    };
+}
 
-    const rightX = width - 350;
-    const rightY = 200;
+async function sendCard(message, buffer, body, mentions) {
+    const dir = path.join(__dirname, "..", "cache");
+    await fs.ensureDir(dir);
+    const filePath = path.join(dir, `welcome_${Date.now()}.png`);
+    await fs.writeFile(filePath, buffer);
 
-    await drawProfileImage(ctx, userImg, rightX, rightY + 130, 240, "#00e5ff", "rgba(0, 229, 255, 0.5)", 'hexagon');
+    const payload = { attachment: fs.createReadStream(filePath) };
+    if (body) payload.body = body;
+    if (mentions) payload.mentions = mentions;
+    await message.send(payload);
 
-    ctx.textAlign = "center";
-    ctx.font = 'bold 42px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = "#ffffff";
-    ctx.shadowColor = "#00e5ff";
-    ctx.shadowBlur = 15;
-    ctx.fillText(userName, rightX, rightY + 320);
-    ctx.shadowBlur = 0;
-
-    ctx.font = 'bold 40px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = "#e0e0e0";
-    ctx.fillText("◇ ◇ ◇ ◇ ◇", rightX, rightY + 380);
-
-    ctx.font = 'bold 32px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = "#ff8800";
-    ctx.fillText(`[ ${userNumber}th Member ]`, rightX, rightY + 450);
-
-    ctx.textAlign = "center";
-    ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = "#666666";
-    ctx.fillText("Created By xalman", width / 2, height - 80);
-
-    ctx.textAlign = "right";
-    ctx.font = '16px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = "#666666";
-    ctx.fillText("Embrace the Nightmare ☾", width - 60, height - 60);
-
-    return canvas.toBuffer();
+    setTimeout(() => fs.remove(filePath).catch(() => { }), 10000);
 }
 
 module.exports = {
     config: {
         name: "welcome",
-        version: "5.0",
+        version: "6.0",
         author: "xalman",
         category: "events"
     },
@@ -307,11 +489,47 @@ module.exports = {
         const { nickNameBot } = global.GoatBot.config;
         const prefix = global.utils.getPrefix(threadID);
         const dataAddedParticipants = event.logMessageData.addedParticipants;
+        const botID = api.getCurrentUserID();
 
-        if (dataAddedParticipants.some((item) => item.userFbId == api.getCurrentUserID())) {
+        if (dataAddedParticipants.some((item) => item.userFbId == botID)) {
             if (nickNameBot)
-                api.changeNickname(nickNameBot, threadID, api.getCurrentUserID());
-            return message.send(getLang("welcomeMessage", prefix));
+                api.changeNickname(nickNameBot, threadID, botID);
+
+            try {
+                const threadData = await threadsData.get(threadID);
+                const group = await getGroupInfo(api, threadID, threadData);
+                const adderID = event.author;
+
+                const [botAvatar, adderAvatar, adderNameRaw, botNameRaw] = await Promise.all([
+                    usersData.getAvatarUrl(botID),
+                    usersData.getAvatarUrl(adderID),
+                    usersData.getName(adderID),
+                    usersData.getName(botID)
+                ]);
+                const [botImg, groupImg, adderImg] = await Promise.all([
+                    fetchImage(botAvatar),
+                    fetchImage(group.image),
+                    fetchImage(adderAvatar)
+                ]);
+
+                const buffer = await createBotCard({
+                    botImg,
+                    groupImg,
+                    adderImg,
+                    botName: nickNameBot || botNameRaw || "BOT",
+                    groupName: group.name,
+                    adderName: adderNameRaw || "Unknown",
+                    memberCount: group.memberCount,
+                    adminCount: group.adminCount,
+                    prefix,
+                    dateStr: getTime("DD/MM/YYYY")
+                });
+
+                return await sendCard(message, buffer);
+            } catch (error) {
+                console.error("[WELCOME] Bot card error:", error);
+                return message.send(getLang("welcomeMessage", prefix));
+            }
         }
 
         if (!global.temp.welcomeEvent[threadID])
@@ -330,7 +548,6 @@ module.exports = {
 
             const addedParticipants = global.temp.welcomeEvent[threadID].dataAddedParticipants;
             const dataBanned = threadData.data.banned_ban || [];
-            const threadName = threadData.threadName || "this group";
             const userName = [], mentions = [];
             let multiple = addedParticipants.length > 1;
 
@@ -341,7 +558,13 @@ module.exports = {
                 mentions.push({ tag: user.fullName, id: user.userFbId });
             }
 
-            if (userName.length == 0) return;
+            if (userName.length == 0) {
+                delete global.temp.welcomeEvent[threadID];
+                return;
+            }
+
+            const group = await getGroupInfo(api, threadID, threadData);
+            const threadName = group.name;
 
             let { welcomeMessage = getLang("defaultWelcomeMessage") } = threadData.data;
 
@@ -354,38 +577,35 @@ module.exports = {
             try {
                 const firstUser = addedParticipants[0];
                 const adderID = event.author;
-                
-                let userAvatar = await usersData.getAvatarUrl(firstUser.userFbId);
-                let adderAvatar = await usersData.getAvatarUrl(adderID);
-                let groupImage = threadData.imageSrc || `https://graph.facebook.com/${threadID}/picture?width=720&height=720`;
-                let adderName = await usersData.getName(adderID) || "Unknown";
-                let memberCount = threadData.members?.length || 1;
 
-                const imageBuffer = await createWelcomeCard(
-                    groupImage,
-                    userAvatar,
-                    adderAvatar,
-                    firstUser.fullName,
-                    memberCount,
-                    threadName,
-                    adderName
-                );
+                const [userAvatar, adderAvatar, adderNameRaw] = await Promise.all([
+                    usersData.getAvatarUrl(firstUser.userFbId),
+                    usersData.getAvatarUrl(adderID),
+                    usersData.getName(adderID)
+                ]);
+                const [userImg, adderImg, groupImg] = await Promise.all([
+                    fetchImage(userAvatar),
+                    fetchImage(adderAvatar),
+                    fetchImage(group.image)
+                ]);
 
-                const tempDir = path.join(__dirname, '..', 'cache');
-                await fs.ensureDir(tempDir);
-                const tempPath = path.join(tempDir, `welcome_${Date.now()}.png`);
-                fs.writeFileSync(tempPath, imageBuffer);
+                const displayName = userName.length > 1
+                    ? `${userName[0]} +${userName.length - 1}`
+                    : userName[0];
 
-                await message.send({
-                    body: welcomeMessage,
-                    attachment: fs.createReadStream(tempPath),
-                    mentions: mentions
+                const buffer = await createWelcomeCard({
+                    groupImg,
+                    userImg,
+                    adderImg,
+                    userName: displayName,
+                    memberCount: group.memberCount,
+                    groupName: threadName,
+                    adderName: adderNameRaw || "Unknown",
+                    dateStr: getTime("DD/MM/YYYY"),
+                    timeStr: getTime("hh:mm A")
                 });
 
-                setTimeout(() => {
-                    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-                }, 10000);
-
+                await sendCard(message, buffer, welcomeMessage, mentions);
             } catch (error) {
                 console.error("[WELCOME] Card creation error:", error);
                 await message.send({
@@ -398,3 +618,6 @@ module.exports = {
         }, 400);
     }
 };
+
+module.exports.createWelcomeCard = createWelcomeCard;
+module.exports.createBotCard = createBotCard;
