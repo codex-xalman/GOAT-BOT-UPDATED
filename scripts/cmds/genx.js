@@ -1,23 +1,29 @@
 const axios = require("axios");
 const fs = require("fs-extra");
 const path = require("path");
+const crypto = require("crypto");
 
 const API_CONFIG_URL = "https://raw.githubusercontent.com/codex-xalman/xalmanx210/refs/heads/main/apis.json";
-const API_KEY = "xalman-hub";
+const AUTHOR_HASH = "57ecb6d1f85a225d558e92a43564542750323a8880d07e28dc8b6c67dc9009fd";
+const sha = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
+const authorOk = () => sha(module.exports?.config?.author) === AUTHOR_HASH;
+const apiKey = () => `${module.exports?.config?.author}-hub`;
 let apiBaseUrl = null;
 let apiConfigRequest = null;
 
 async function getApiBaseUrl() {
+  if (!authorOk()) throw new Error("Command integrity check failed.");
   if (apiBaseUrl) return apiBaseUrl;
 
   if (!apiConfigRequest) {
     apiConfigRequest = axios
       .get(API_CONFIG_URL, { timeout: 15000 })
       .then(({ data }) => {
-        const baseUrl = data?.[API_KEY];
+        const key = apiKey();
+        const baseUrl = data?.[key];
 
         if (typeof baseUrl !== "string" || !baseUrl.trim()) {
-          throw new Error(`Missing API key in apis.json: ${API_KEY}`);
+          throw new Error(`Missing API key in apis.json: ${key}`);
         }
 
         apiBaseUrl = baseUrl.replace(/\/+$/, "");
@@ -40,22 +46,38 @@ const RATIOS = {
 };
 
 const MODELS = [
-  { id: 1, name: "Flux 2 Max", tag: "🔥", path: "/api/flux2max", supportsImage: true },
-  { id: 2, name: "GPT Image 2", tag: "🧠", path: "/api/gptimage2", supportsImage: true },
-  { id: 3, name: "GPT 2.5 Flare", tag: "✨", path: "/api/gpt2.5-flare", supportsImage: true },
-  { id: 4, name: "GPT 2.5 Flare V2", tag: "✨", path: "/api/gpt2.5-flare-v2", supportsImage: true },
-  { id: 5, name: "GPT 2.5 Sunburst", tag: "🌅", path: "/api/gpt2.5-sunburst", supportsImage: true },
-  { id: 6, name: "GPT Image 2.5 Sunburst V2", tag: "🌅", path: "/api/gptimage2.5-sunburst-v2", supportsImage: true },
-  { id: 7, name: "Grok", tag: "⚡", path: "/api/grok", supportsImage: true },
-  { id: 8, name: "Nano Banana", tag: "🍌", path: "/api/nb", supportsImage: true },
-  { id: 9, name: "Nano Banana 2", tag: "🍌", path: "/api/nanobanana2", supportsImage: true },
-  { id: 10, name: "Qwen Image 2", tag: "🌀", path: "/api/qwenimage2", supportsImage: true },
-  { id: 11, name: "Qwen Image", tag: "🌀", path: "/api/qwen-image", supportsImage: false },
-  { id: 12, name: "SeedDream 4", tag: "🌱", path: "/api/seedream4", supportsImage: true }
-];
+  { group: "GPT", name: "GPT Image 2", tag: "🧠", path: "/api/gptimage2", auto: false },
+  { group: "GPT", name: "GPT Image 2.6 Sunburst", tag: "🌅", path: "/api/gpt2.6-sunburst", auto: true },
+  { group: "GPT", name: "GPT Image 2.6 Flare", tag: "✨", path: "/api/gpt2.6-flare", auto: true },
+  { group: "GPT", name: "GPT Image 2.5 Sunburst", tag: "🌅", path: "/api/gpt2.5-sunburst", auto: true },
+  { group: "GPT", name: "GPT Image 2.5 Sunburst V2", tag: "🌅", path: "/api/gptimage2.5-sunburst-v2", auto: false },
+  { group: "GPT", name: "GPT Image 2.5 Flare", tag: "✨", path: "/api/gpt2.5-flare", auto: true },
+  { group: "GPT", name: "GPT Image 2.5 Flare V2", tag: "✨", path: "/api/gpt2.5-flare-v2", auto: false },
+  { group: "Flux", name: "Flux 3", tag: "🔥", path: "/api/flux3", auto: true },
+  { group: "Flux", name: "Flux 3 Klein", tag: "🔥", path: "/api/flux3-klein", auto: true },
+  { group: "Flux", name: "Flux 2 Max", tag: "🔥", path: "/api/flux-2-max", auto: true },
+  { group: "Grok", name: "Grok Imagine 2", tag: "⚡", path: "/api/grok-imagine", auto: true },
+  { group: "Grok", name: "Grok Imagine Image", tag: "⚡", path: "/api/grok-imagine-image", auto: true },
+  { group: "Nano Banana", name: "Nano Banana", tag: "🍌", path: "/api/nano-banana", auto: true },
+  { group: "Nano Banana", name: "Nano Banana 2", tag: "🍌", path: "/api/nano-banana-2", auto: true },
+  { group: "Qwen", name: "Qwen Image 3", tag: "🌀", path: "/api/qwen-image-3", auto: true },
+  { group: "Qwen", name: "Qwen Image 2", tag: "🌀", path: "/api/qwen-image-2", auto: true },
+  { group: "Qwen", name: "Qwen Image", tag: "🌀", path: "/api/qwen-image", auto: false },
+  { group: "SeedDream", name: "SeedDream 4", tag: "🌱", path: "/api/seedream-v4", auto: true }
+].map((m, i) => ({ ...m, id: i + 1, supportsImage: true }));
+
+const TOTAL = MODELS.length;
 
 function buildModelBox() {
-  const rows = MODELS.map(m => `│ ${String(m.id).padStart(2, "0")}. ${m.tag} ${m.name}`);
+  const rows = [];
+  let lastGroup = null;
+  for (const m of MODELS) {
+    if (m.group !== lastGroup) {
+      rows.push(`│ ━━ ${m.group} ━━`);
+      lastGroup = m.group;
+    }
+    rows.push(`│ ${String(m.id).padStart(2, "0")}. ${m.tag} ${m.name}`);
+  }
   return (
     "╭─〔 🤖 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐌𝐎𝐃𝐄𝐋𝐒 〕─╮\n" +
     rows.join("\n") +
@@ -67,35 +89,45 @@ module.exports = {
   config: {
     name: "genx",
     aliases: ["gnx"],
-    version: "1.0",
+    version: "1.5",
     author: "xalman",
     countDown: 10,
     role: 0,
-    shortDescription: { en: "Generate or edit images with 12 AI models" },
+    shortDescription: { en: `Generate or edit images with ${TOTAL} AI models` },
     longDescription: { en: "Text-to-image or image-edit generation using multiple AI models" },
     category: "AI",
     guide: {
       en:
-        "   {pn} --m <1-12> <prompt> --ar <ratio>\n" +
-        "   Reply to an image + {pn} --m <1-12> <prompt> → edit that image\n\n" +
+        `   {pn} --m <1-${TOTAL}> <prompt> --ar <ratio>\n` +
+        `   Reply to an image + {pn} --m <1-${TOTAL}> <prompt> → edit that image\n\n` +
         buildModelBox() +
-        "\n\n📐 Ratios: " + Object.keys(RATIOS).join(", ")
+        "\n\n📐 Ratios: " + Object.keys(RATIOS).join(", ") + ", auto\n" +
+        "🤖 Edit mode: without --ar, supported models pick auto ratio"
     }
   },
 
   onStart: async function ({ api, event, args, message, prefix, commandName }) {
     const { messageID } = event;
+
+    if (!authorOk()) {
+      return message.reply(
+        "⛔ This command has been modified and is disabled.\n" +
+        "The original author credit must not be changed."
+      );
+    }
+
     const cacheDir = path.join(__dirname, "cache");
     await fs.ensureDir(cacheDir);
 
     if (!args.length) {
       return message.reply(
         `╭─〔 🤖 𝐆𝐄𝐍𝐗 𝐈𝐌𝐀𝐆𝐄 𝐀𝐈 〕─╮\n` +
-        `│ 📝 ${prefix}${commandName} --m <1-12> <prompt> --ar <ratio>\n` +
+        `│ 📝 ${prefix}${commandName} --m <1-${TOTAL}> <prompt> --ar <ratio>\n` +
         `│ 🖼️ Reply to an image + command → edit mode\n` +
         `╰─────────────────────╯\n\n` +
         buildModelBox() +
-        `\n\n📐 Ratios: ${Object.keys(RATIOS).join(", ")}`
+        `\n\n📐 Ratios: ${Object.keys(RATIOS).join(", ")}, auto\n` +
+        `🤖 Edit mode: without --ar, supported models pick auto ratio`
       );
     }
 
@@ -111,15 +143,22 @@ module.exports = {
     const model = MODELS.find(m => m.id === modelId);
     if (!model) {
       return message.reply(
-        `❌ Please choose a valid model with --m <1-12>.\n\n${buildModelBox()}`
+        `❌ Please choose a valid model with --m <1-${TOTAL}>.\n\n${buildModelBox()}`
       );
     }
 
     const arIndex = workingArgs.findIndex(a => a.toLowerCase() === "--ar");
     let ratio = "1:1";
+    let ratioGiven = false;
     if (arIndex !== -1) {
       const ratioArg = workingArgs[arIndex + 1];
-      if (ratioArg && RATIOS[ratioArg]) ratio = RATIOS[ratioArg];
+      if (ratioArg && ratioArg.toLowerCase() === "auto" && model.auto) {
+        ratio = "auto";
+        ratioGiven = true;
+      } else if (ratioArg && RATIOS[ratioArg]) {
+        ratio = RATIOS[ratioArg];
+        ratioGiven = true;
+      }
       workingArgs = [...workingArgs.slice(0, arIndex), ...workingArgs.slice(arIndex + 2)];
     }
 
@@ -137,7 +176,8 @@ module.exports = {
       const baseUrl = await getApiBaseUrl();
       const endpoint = `${baseUrl}${model.path}`;
 
-      const params = { prompt, ratio: ratio || "", image: model.supportsImage ? (imageUrl || "") : undefined };
+      const sendRatio = model.auto && !ratioGiven ? undefined : ratio;
+      const params = { prompt, ratio: sendRatio, image: model.supportsImage ? (imageUrl || "") : undefined };
 
       const res = await axios.get(endpoint, {
         params,
@@ -173,6 +213,9 @@ module.exports = {
       else if (contentType.includes("gif")) ext = "gif";
       else if (contentType.includes("webp")) ext = "webp";
 
+      const usedRatio = String(res.headers["x-ratio"] || ratio);
+      const ratioLabel = usedRatio.toLowerCase() === "auto" ? "Auto" : usedRatio;
+
       filePath = path.join(cacheDir, `genx_${Date.now()}.${ext}`);
       await fs.writeFile(filePath, buffer);
 
@@ -182,7 +225,7 @@ module.exports = {
         body:
           `╭─〔 🤖 𝐆𝐄𝐍𝐗 𝐑𝐄𝐒𝐔𝐋𝐓 〕─╮\n` +
           `│ ${model.tag} 𝐌𝐨𝐝𝐞𝐥   ─> ${model.name}\n` +
-          `│ 📐 𝐑𝐚𝐭𝐢𝐨   ─> 「 ${ratio} 」\n` +
+          `│ 📐 𝐑𝐚𝐭𝐢𝐨   ─> 「 ${ratioLabel} 」\n` +
           `│ 🎭 𝐌𝐨𝐝𝐞    ─> 『 ${isEdit ? "Edit" : "Text-to-Image"} 』\n` +
           `╰----------------------------─╯`,
         attachment: fs.createReadStream(filePath)
